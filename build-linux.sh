@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# build-linux.sh — colcon 交叉编译 eai_bot 包（RK3588 / aarch64 / ROS2 Jazzy）
+# build-linux.sh — colcon 交叉编译 robot_eai 包（RK3588 / aarch64 / ROS2 Jazzy）
 #
 # 用法：
 #   cd <workspace_root>
@@ -47,7 +47,7 @@ cd "${ROOT_PWD}"
 # 构建参数
 # 关键：-DCMAKE_SYSROOT 设置为 ROS sysroot，解决绝对路径依赖问题
 colcon build \
-  --packages-select eai_bot \
+  --packages-select robot_eai \
   --cmake-args \
     -DCMAKE_TOOLCHAIN_FILE="${ROOT_PWD}/toolchain_rk3588.cmake" \
     -DCMAKE_SYSROOT="${SYSROOT_ROS}" \

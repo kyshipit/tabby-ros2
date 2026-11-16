@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 KY (kyshipit)
+# SPDX-FileCopyrightText: 2026 kyshipit
 
 # 单个检测框，含可选关键点（SCRFD 人脸）。
 

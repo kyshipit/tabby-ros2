@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 KY (kyshipit)
+# SPDX-FileCopyrightText: 2026 kyshipit
 
 # EAI 检测结果消息。
 # 每个槽位每帧发布一条 DetectionResult，包含该槽位的所有检测框。
