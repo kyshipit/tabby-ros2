@@ -1,7 +1,4 @@
-# SPDX-License-Identifier: MIT
-# SPDX-FileCopyrightText: 2026 kyshipit
-
-# EAI 检测结果消息。
+# DetectionResult.msg，EAI 检测结果消息。
 # 每个槽位每帧发布一条 DetectionResult，包含该槽位的所有检测框。
 
 # 帧编号（对应 InferenceTask::frame_id）。

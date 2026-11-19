@@ -1,14 +1,20 @@
-cmake_minimum_required(VERSION 3.15)
+cmake_minimum_required(VERSION 3.14)
 project(robot_eai)
 
 # ==========================================================================
-# 1. C++ 标准
+# 1. 语言标准
 # ==========================================================================
 if(NOT CMAKE_CXX_STANDARD)
   set(CMAKE_CXX_STANDARD 17)
 endif()
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# 编译警告（与 bringup 一致）
+if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+  add_compile_options(-Wall -Wextra -Wpedantic)
+endif()
+
+# 目标平台（保留 robot_eai 特有逻辑）
 if(NOT DEFINED TARGET_SOC)
   set(TARGET_SOC "rk3588")
   message(STATUS "robot_eai: TARGET_SOC default rk3588")
@@ -16,34 +22,37 @@ endif()
 message(STATUS "robot_eai: TARGET_SOC=${TARGET_SOC}")
 
 # ==========================================================================
-# 2. ROS2 消息生成
+# 2. 依赖查找
 # ==========================================================================
 find_package(ament_cmake REQUIRED)
-
-set(CMAKE_DISABLE_FIND_PACKAGE_rosidl_generator_py TRUE)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(std_msgs REQUIRED)
+find_package(ament_index_cpp REQUIRED)
+find_package(Threads REQUIRED)
 
+# OpenCV：板端系统安装，走标准 find_package（替代原硬编码 sysroot 路径）
+find_package(OpenCV REQUIRED COMPONENTS
+  core flann videoio video highgui imgcodecs imgproc dnn)
+
+# ==========================================================================
+# 3. ROS2 消息生成
+# ==========================================================================
 set(msg_files
   "msg/Point2D.msg"
   "msg/Box.msg"
   "msg/DetectionResult.msg"
 )
-
-message(STATUS "=== msg_files content: ${msg_files} ===")
-rosidl_generate_interfaces(${PROJECT_NAME}
-  ${msg_files}
-)
+rosidl_generate_interfaces(${PROJECT_NAME} ${msg_files})
 
 # ==========================================================================
-# 3. 3rdparty 和 utils
+# 4. 3rdparty 和 utils 子项目
 # ==========================================================================
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/ 3rdparty.out)
 add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/utils/ utils.out)
 
 # ==========================================================================
-# 4. 平台相关库
+# 5. 平台相关库（RKNN / RKLLM）
 # ==========================================================================
 set(RKNN_API_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/rknpu2/Linux/aarch64)
 set(LIBRKNNRT ${RKNN_API_DIR}/librknnrt.so)
@@ -53,23 +62,8 @@ set(RKLLM_API_DIR ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/rkllm)
 set(LIBRKLLMRT ${RKLLM_API_DIR}/lib/librkllmrt.so)
 set(LIBGOMP ${RKLLM_API_DIR}/lib/libgomp/libgomp.so)
 
-# ---------- OpenCV：使用工具链 sysroot 中的完整 OpenCV ----------
-set(TOOLCHAIN_SYSROOT /opt/atk-dlrk3588-toolchain/aarch64-buildroot-linux-gnu/sysroot)
-set(OPENCV_INCLUDE_DIRS ${TOOLCHAIN_SYSROOT}/usr/include/opencv4)
-set(OPENCV_LIB_DIR ${TOOLCHAIN_SYSROOT}/usr/lib)
-set(OPENCV_LIBS
-  ${OPENCV_LIB_DIR}/libopencv_core.so
-  ${OPENCV_LIB_DIR}/libopencv_flann.so
-  ${OPENCV_LIB_DIR}/libopencv_videoio.so
-  ${OPENCV_LIB_DIR}/libopencv_video.so
-  ${OPENCV_LIB_DIR}/libopencv_highgui.so
-  ${OPENCV_LIB_DIR}/libopencv_imgcodecs.so
-  ${OPENCV_LIB_DIR}/libopencv_imgproc.so
-  ${OPENCV_LIB_DIR}/libopencv_dnn.so
-)
-
 # ==========================================================================
-# 5. 可执行文件 robot_eai_app
+# 6. 可执行文件
 # ==========================================================================
 set(robot_eai_SRC
   app/main_ros.cc
@@ -103,24 +97,12 @@ set(robot_eai_SRC
 add_executable(robot_eai_app ${robot_eai_SRC})
 target_link_options(robot_eai_app PRIVATE -no-pie)
 
-# 链接选项：覆盖 sysroot 为 ROS sysroot，保证 ROS 依赖的标准库（libm等）能找到
-# 同时通过 rpath-link 让工具链 OpenCV 的依赖也能找到
-if(DEFINED ROS_SYSROOT)
-  target_link_options(robot_eai_app PRIVATE
-    -Wl,--sysroot=${ROS_SYSROOT}
-    -Wl,-rpath-link,${TOOLCHAIN_SYSROOT}/usr/lib
-    -Wl,-rpath-link,${TOOLCHAIN_SYSROOT}/lib
-    -Wl,-rpath-link,${ROS_SYSROOT}/lib/aarch64-linux-gnu
-    -Wl,-rpath-link,${ROS_SYSROOT}/usr/lib/aarch64-linux-gnu
-    -Wl,--dynamic-linker=/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1
-  )
-  target_link_directories(robot_eai_app PRIVATE
-    ${TOOLCHAIN_SYSROOT}/usr/lib
-    ${TOOLCHAIN_SYSROOT}/lib
-    ${ROS_SYSROOT}/lib/aarch64-linux-gnu
-    ${ROS_SYSROOT}/usr/lib/aarch64-linux-gnu
-  )
-endif()
+# 原 toolchain 文件里的编译选项，板端继续保留
+target_compile_options(robot_eai_app PRIVATE
+  -funwind-tables -rdynamic
+  -Wno-write-strings -Wno-return-type)
+target_compile_options(robot_eai_app PRIVATE
+  $<$<CONFIG:Debug>:-g;-O0;-ggdb;-gdwarf>)
 
 target_include_directories(robot_eai_app PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}
@@ -133,11 +115,17 @@ target_include_directories(robot_eai_app PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/3rdparty/timer
   ${RKLLM_API_DIR}/include
   ${LIBRKNNRT_INCLUDES}
-  ${OPENCV_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
 )
 
-find_package(ament_index_cpp REQUIRED)
+# ROS 依赖（与 bringup 同风格）
+ament_target_dependencies(robot_eai_app
+  rclcpp
+  std_msgs
+  ament_index_cpp
+)
 
+# 非 ROS 库（RKNN / RKLLM / OpenCV / 子项目 target）
 target_link_libraries(robot_eai_app
   imageutils
   fileutils
@@ -146,20 +134,27 @@ target_link_libraries(robot_eai_app
   ${LIBRKNNRT}
   ${LIBRKLLMRT}
   ${LIBGOMP}
-  ${OPENCV_LIBS}
-  ament_index_cpp::ament_index_cpp
+  ${OpenCV_LIBS}
+  Threads::Threads
 )
 
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads REQUIRED)
-target_link_libraries(robot_eai_app Threads::Threads)
-
 add_definitions(-DTRACETOOLS_DISABLED)
+
+# 本包 msg 的 C++ typesupport
 rosidl_get_typesupport_target(cpp_typesupport_target "${PROJECT_NAME}" "rosidl_typesupport_cpp")
 target_link_libraries(robot_eai_app "${cpp_typesupport_target}")
-target_link_libraries(robot_eai_app rclcpp::rclcpp)
-target_link_libraries(robot_eai_app std_msgs::std_msgs)
 
+# ==========================================================================
+# 7. 测试（与 bringup 同风格）
+# ==========================================================================
+if(BUILD_TESTING)
+  find_package(ament_lint_auto REQUIRED)
+  ament_lint_auto_find_test_dependencies()
+endif()
+
+# ==========================================================================
+# 8. 安装
+# ==========================================================================
 install(TARGETS robot_eai_app DESTINATION lib/${PROJECT_NAME})
 install(FILES ${LIBRKNNRT} DESTINATION lib)
 install(FILES ${LIBRKLLMRT} ${LIBGOMP} DESTINATION lib)
@@ -177,6 +172,7 @@ install(FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/../../model/lexicon.txt
   ${CMAKE_CURRENT_SOURCE_DIR}/../../model/tokens.txt
   DESTINATION share/${PROJECT_NAME}/model OPTIONAL)
+
 file(GLOB CONFIG_FILES "${CMAKE_CURRENT_SOURCE_DIR}/config/*.yaml")
 install(FILES ${CONFIG_FILES} DESTINATION share/${PROJECT_NAME}/config)
 
